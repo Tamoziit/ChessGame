@@ -1,0 +1,35 @@
+**BASIC ARCHITECTURE
+
+HTTP server primarily cannot receive message from browser1(say) and push it immediately to browser2(say) in realtime --> This is achieved by implementing "WebSockets" --> For this 'ws' library has been used.
+
+Whenever a user makes a request to the Web Socket server --> "init_game" --> The server checks if there is already any pendingUser in the active socket --> If YES, then the current user joins that games --> ELSE he becomes the pendingUser & waits for someone to join.
+
+Here, we are using classes to manage backend logics -->
+=> GameManager class contains functions to manage different coonection & game functionalities like, joining, exiting, handling moves etc.
+=> Game Class contains object to store {player1, player2, board state, moves, startTime} & makeMove() handler to handle move request by calling chess.js endpoints.
+
+Chess Logic --> chess.js library handles all required chess logic 
+
+
+
+**RECOVERY MECHANISM : We want to persist the moves of a game in a dB such that...even if the stateful WS server goes down, the whole in-memory objects & data are not lost, & the game state before the crash can be recovered.
+
+#Approach 1: Having a semi-stateful Websocket instead of a fully stateful WS. --> Whenever a move payload is sent to the WS by a browser, it is validated in the in-memory object(state), if it is valid or not --> if valid then it is pushed to the DB, where we persist the move in the memory. 
+Drawback: The pushing of each move to remote DB might take a lot of time for a heavy appli. & hence transfer of payloads b/w the browsers connected to the WS might become significantly slow.
+
+#Approach  2 (Micro-optimized): Instead of directly pushing a new move that comes to the WS, we can temporarily store it in a "Redis Queue" or "Network File System". This makes the transfer of requests b/w the browsers via WS faster, & the temporarily storedd data can be pushed to the DB eventually.
+
+
+
+**SCALING
+
+#Approach 1: Sharding (Brute Force) --> Having multiple WebSocket servers for multiple users --> picking a random WS server & making sure, 2 people in the same waiting room are connected to the same WS server. --> Can support roughly 5-10K users in a single room.
+
+#Approach 2: Publisher Subscriber (PubSub) system --> Every user in a room can be connected to different WS servers --> When an event iis published or pushed by a user from the concerned room to a WS --> The WS relays the message to an apex PubSub layer --> The PubSub layer then relays the payload to other WS servers connected to it where, atleast one user from the same room as that from where the original exciting payload originated, is connected (basically sends relays any event from a WS to other WS servers where users sharing the same room are connected --> via a PubSub tree).
+
+PubSub ---->WS 1 ---> [u1, u2, u3...]
+ |  |
+ |  -----> WS 2 ---> [u34, u35, u37...]
+ ---------> WS 3 ---> [u100, u101, u102...]
+
+where "X" be the room containing [u1, u2, u3,....,u34, u35, u36...., u100, u101, u102,.....] --> This scaling method can support upto 1-10M users in a single room.
